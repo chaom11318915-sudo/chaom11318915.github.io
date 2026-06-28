@@ -575,16 +575,21 @@
             // Update page title and content
             updatePageContent();
 
-            // Generate images for this unit
-            generateImages();
+            // Show a temporary loading state while we probe for images
+            const galleryGrid = document.getElementById('gallery-grid');
+            if (galleryGrid) {
+                galleryGrid.innerHTML = '<div class="text-center text-white py-5"><i class="fas fa-spinner fa-spin me-2"></i>偵測圖片中...</div>';
+            }
 
-            // First load metadata, then render gallery
-            loadMetadata().then(() => {
-                // Render gallery
-                renderGallery();
+            // Generate images for this unit (動態偵測有幾張圖), then load metadata & render
+            generateImages().then(() => {
+                loadMetadata().then(() => {
+                    // Render gallery
+                    renderGallery();
 
-                // Fetch dates after elements are in DOM (fallback)
-                images.forEach((img, idx) => fetchImageDate(img, idx));
+                    // Fetch dates after elements are in DOM (fallback)
+                    images.forEach((img, idx) => fetchImageDate(img, idx));
+                });
             });
 
             // Update navigation
@@ -766,7 +771,7 @@
             const unit = unitInfo[currentUnit];
             const unitText = `單元 #${currentUnit}`;
             const unitFullTitle = `${unitText}: ${unit.name}`;
-            const subtitleText = `單元 ${currentUnit} 作業 - ${unit.attributes.join('、')}`;
+            const subtitleText = `單元 ${currentUnit} 作業`;
             const titleText = `${unitFullTitle} - 專案詳情 | 2026 AI`;
 
             // Update page title
@@ -783,17 +788,46 @@
         }
 
         // Generate images array for current unit
-        function generateImages() {
+        // 檢查圖片是否存在
+        function checkImageExists(src) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve(true);
+                img.onerror = () => resolve(false);
+                img.src = src;
+            });
+        }
+
+        // 依序偵測 pic/unit{N}_1.jpg, _2.jpg... 直到找不到為止
+        // 若完全沒有對應圖片，則改用 pic/no.jpg 顯示一張預設圖
+        async function generateImages() {
             const unit = unitInfo[currentUnit];
             images = [];
-            for (let i = 1; i <= 3; i++) {
-                const imageData = {
-                    src: `pic/unit${currentUnit}_${i}.jpg`,
+
+            let i = 1;
+            const maxCheck = 30; // 安全上限，避免無止盡偵測
+            while (i <= maxCheck) {
+                const src = `pic/unit${currentUnit}_${i}.jpg`;
+                const exists = await checkImageExists(src);
+                if (!exists) break;
+
+                images.push({
+                    src: src,
                     title: `${unit.name} - 圖片 ${i}`,
-                    description: `單元 #${currentUnit}: ${unit.name} 作業圖片 ${i} (${unit.attributes.join('、')})`,
+                    description: `單元 #${currentUnit}: ${unit.name} 作業圖片 ${i}`,
                     lastModified: '讀取中...'
-                };
-                images.push(imageData);
+                });
+                i++;
+            }
+
+            // 找不到任何對應圖片時，顯示預設圖
+            if (images.length === 0) {
+                images.push({
+                    src: 'pic/no.jpg',
+                    title: `${unit.name} - 尚無圖片`,
+                    description: `單元 #${currentUnit}: ${unit.name} 目前尚未上傳作業圖片`,
+                    lastModified: '未知'
+                });
             }
         }
 
@@ -846,13 +880,7 @@
 
             galleryGrid.innerHTML = images.map((image, index) => {
                 const title = image.title;
-                const fileName = `unit${currentUnit}_${index + 1}`;
-                const attributeBadges = unit.attributes.map(attr => {
-                    const badgeClass = attr.includes('感知式') ? 'bg-primary' : 
-                                     attr.includes('生成式') ? 'bg-success' : 
-                                     attr.includes('代理式') ? 'bg-warning' : 'bg-secondary';
-                    return `<span class="badge ${badgeClass} me-1">${attr}</span>`;
-                }).join('');
+                const fileName = image.src.split('/').pop().replace(/\.[^.]+$/, '');
 
                 return `
                     <div class="gallery-item" data-bs-toggle="modal" data-bs-target="#imageModal" onclick="showImage(${index})">
@@ -863,7 +891,6 @@
                             <div class="upload-time" id="upload-time-${index}">
                                 <i class="far fa-clock"></i> 最後提交: ${image.lastModified}
                             </div>
-                            <div class="mt-2">${attributeBadges}</div>
                         </div>
                     </div>
                 `;
